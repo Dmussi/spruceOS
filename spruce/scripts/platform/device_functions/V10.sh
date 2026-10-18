@@ -13,6 +13,44 @@ apply_playback_path() {
     :
 }
 
+# device_init from dArkMossCommon.sh, plus a boot timing record: spruce's own
+# start-up takes ~7 s on a V10 (first log), so where a slow boot spends its time
+# is before spruce, in the kernel and systemd. Written to darkmoss_debug.log.
+device_init() {
+    v10_boot_timing &
+    migrate_platform_files
+    resolve_pad_node
+    log_message "$PLATFORM: TF2 is ${SD_DEV:-<unresolved>} at $SD_MOUNTPOINT"
+    resolve_key_event_node
+    setup_mainui_alias
+    if [ -n "$DARKMOSS_SEED_SYSTEM_JSON" ] && [ ! -f "$SYSTEM_JSON" ] && [ -f "$SYSTEM_JSON_DEFAULT" ]; then
+        cp "$SYSTEM_JSON_DEFAULT" "$SYSTEM_JSON"
+    fi
+    set_backlight "$(get_backlight_level)"
+    darkmoss_wifi_up
+    /mnt/SDCARD/spruce/scripts/bluetooth.sh boot &
+    darkmoss_debug_dump
+    clear_stale_pmic_power_en &
+}
+
+v10_boot_timing() {
+    _up="$(cut -d' ' -f1 /proc/uptime)"
+    log_message "$PLATFORM: spruce started ${_up}s after the kernel"
+    sleep 45
+    {
+        echo "================ boot timing $(date) ================"
+        echo "--- spruce started at uptime ${_up}s"
+        echo "--- systemd-analyze"
+        systemd-analyze 2>&1
+        echo "--- systemd-analyze blame (top 25)"
+        systemd-analyze blame 2>&1 | head -25
+        echo "--- systemd-analyze critical-chain"
+        systemd-analyze critical-chain 2>&1 | head -30
+        echo "--- dmesg: slowest gaps"
+        dmesg 2>/dev/null | awk -F'[][]' '{t=$2+0; if (NR>1 && t-p>0.5) printf "%.2fs gap before: %s\n", t-p, $0; p=t}' | head -20
+    } >> "$DARKMOSS_DEBUG_LOG" 2>&1
+}
+
 # idlemon's default node is the power key here. The js node, because
 # emulators write rumble to the event node.
 set_event_arg_for_idlemon() {
